@@ -60,8 +60,12 @@ void TimebarWidget::setThin(bool thin)
     if (thin == m_thin) return;
     m_thin = thin;
     const int h = preferredHeight();
+    // Block layout signals so no intermediate resize event fires
+    // before the parent overlay has corrected its own geometry.
+    blockSignals(true);
     setMinimumHeight(h);
     setMaximumHeight(h + 2);
+    blockSignals(false);
     updateGeometry();
     update();
 }
@@ -69,9 +73,9 @@ void TimebarWidget::setThin(bool thin)
 int TimebarWidget::preferredHeight() const
 {
     if (m_thin)
-        return kThinBarY + kThinBarH + kThinMrkB + kThinMrkS * 2 + 2;
+        return kThinBarY + kThinBarH + kThinMrkB + kThinMrkS * 2 + 1;
     else
-        return kBarY + kBarH + kMrkBelow + kMrkSize * 2 + 4;
+        return kBarY + kBarH + kMrkBelow + kMrkSize * 2 + 2;
 }
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────
@@ -123,8 +127,10 @@ void TimebarWidget::paintFull(QPainter& p)
 
     // ── Label pills ───────────────────────────────────────────────────────────
     QFont lblFont("Consolas", 7);
+    lblFont.setStyleStrategy(QFont::PreferMatch);  // don't substitute
     p.setFont(lblFont);
-    QFontMetrics lfm(lblFont);
+    // Use the painter's own font metrics — reflects the font Qt actually loaded
+    const QFontMetrics lfm = p.fontMetrics();
     const int pillH = 13;
     int lastRx = -999;
 
@@ -138,13 +144,13 @@ void TimebarWidget::paintFull(QPainter& p)
         const QString lbl = QString::fromStdString(m.label);
 
         if (!lbl.isEmpty()) {
-            const int advance = lfm.horizontalAdvance(lbl);
-            const int margin  = 8;
-            const int pillW   = advance + margin * 2;
+            const int textW  = lfm.horizontalAdvance(lbl);
+            const int margin = 8;   // 8px each side
+            const int pillW  = textW + margin * 2;
             int pillX = xi - pillW / 2;
-            pillX = std::max(kPad, pillX);
+            if (pillX < kPad) pillX = kPad;
             if (pillX < lastRx + 3) pillX = lastRx + 3;
-            pillX = std::min(pillX, w - pillW);
+            if (pillX + pillW > w) pillX = w - pillW;
             const int pillY = (kBarY - pillH) / 2;
 
             p.setBrush(QColor(col.red(), col.green(), col.blue(), 200));
@@ -153,8 +159,8 @@ void TimebarWidget::paintFull(QPainter& p)
 
             const double lum = 0.299 * col.red() + 0.587 * col.green() + 0.114 * col.blue();
             p.setPen(lum > 140 ? QColor(0, 0, 0, 230) : QColor(255, 255, 255, 230));
-            // Baseline draw — no rect clipping at all
-            const int baseline = pillY + pillH - lfm.descent() - 2;
+            // Centre text vertically: pillY + (pillH + ascent - descent) / 2
+            const int baseline = pillY + (pillH + lfm.ascent() - lfm.descent()) / 2;
             p.drawText(pillX + margin, baseline, lbl);
             lastRx = pillX + pillW;
         } else {

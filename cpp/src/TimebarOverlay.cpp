@@ -5,6 +5,7 @@
 #include <QPainter>
 #include <QEvent>
 #include <QMouseEvent>
+#include <QCloseEvent>
 #include <QApplication>
 #include <algorithm>
 
@@ -86,15 +87,16 @@ static const QString kBtnStyle = QStringLiteral(
 
 // ─── Construction ─────────────────────────────────────────────────────────────
 TimebarOverlay::TimebarOverlay(QWidget* viewer)
-    : QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint)
+    : QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus)
     , m_viewer(viewer)
     , m_dragActive(false)
-    , m_dragFraction(0.0)         // position as fraction of viewer height
+    , m_dragFraction(0.0)
     , m_dragStartFraction(0.0)
     , m_dragStartGlobalY(0)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground);
+    setAttribute(Qt::WA_ShowWithoutActivating);  // never steal keyboard focus
     setAutoFillBackground(false);
     setMouseTracking(true);
 
@@ -148,6 +150,23 @@ TimebarOverlay::TimebarOverlay(QWidget* viewer)
     // Apply blur-behind after the window handle exists
     HWND hwnd = reinterpret_cast<HWND>(winId());
     applyBlurBehind(hwnd, kTints[m_opacityIdx]);
+
+    // Re-parent the overlay's HWND to Nuke's main window.
+    // This puts it in the same Z-order group as all other Nuke windows
+    // so it can't fall behind the main window, and floating panes
+    // that are opened later will naturally sit above it.
+    HWND nukeMain = nullptr;
+    if (QWidget* top = qApp->activeWindow())
+        nukeMain = reinterpret_cast<HWND>(top->winId());
+    if (!nukeMain) {
+        // Fall back: walk up the viewer's window hierarchy
+        HWND h = reinterpret_cast<HWND>(viewer->winId());
+        while (::GetParent(h)) h = ::GetParent(h);
+        nukeMain = h;
+    }
+    if (nukeMain)
+        ::SetWindowLongPtr(hwnd, GWLP_HWNDPARENT,
+                           reinterpret_cast<LONG_PTR>(nukeMain));
 }
 
 TimebarOverlay::~TimebarOverlay()
@@ -202,13 +221,44 @@ void TimebarOverlay::goNext()
 
 void TimebarOverlay::toggleThin()
 {
-    const bool thin = !m_bar->isThin();
+    if (!m_viewer || !m_viewer->isVisible()) return;
+
+    static constexpr double kDefaultFraction = 0.75;
+    const int vh = m_viewer->height();
+    const int vw = m_viewer->width();
+
+    // Record the current BOTTOM edge of the overlay (buttons baseline)
+    const int oldOh     = m_bar->preferredHeight() + 4;
+    const double curFrac = std::clamp(kDefaultFraction + m_dragFraction,
+                                      0.0, 1.0 - static_cast<double>(oldOh) / vh);
+    const int oldTopY   = static_cast<int>(curFrac * vh);
+    const int oldBottomY = oldTopY + oldOh;  // this stays fixed
+
+    // Compute new height before touching any state
+    const bool thin   = !m_bar->isThin();
+    const int newBarH = thin
+        ? TimebarWidget::kThinBarY + TimebarWidget::kThinBarH
+          + TimebarWidget::kThinMrkB + TimebarWidget::kThinMrkS * 2 + 1
+        : TimebarWidget::kBarY + TimebarWidget::kBarH
+          + TimebarWidget::kMrkBelow + TimebarWidget::kMrkSize * 2 + 2;
+    const int newOh  = newBarH + 4;
+    const int newTopY = oldBottomY - newOh;  // bottom stays, top moves
+
+    // Update drag fraction to reflect new top position
+    m_dragFraction = static_cast<double>(newTopY) / vh - kDefaultFraction;
+
+    pauseSyncTimer();
+
+    // Lock overlay geometry BEFORE setThin so layout has nothing to change
+    const QPoint g = m_viewer->mapToGlobal(QPoint(0, newTopY));
+    setGeometry(g.x(), g.y(), vw, newOh);
+    setFixedHeight(newOh);
+
     m_bar->setThin(thin);
     m_btnThin->setText(thin ? "^" : "v");
     m_btnThin->setToolTip(thin ? "Expand bar height" : "Collapse bar height");
-    // m_dragFraction positions the top edge — no adjustment needed since
-    // fraction is relative and the top stays fixed when height changes.
-    reposition();
+
+    resumeSyncTimer();
 }
 
 void TimebarOverlay::cycleOpacity()
@@ -279,23 +329,39 @@ void TimebarOverlay::onDeleteMarker(int index)
 // Default: kDefaultFraction places it just below Nuke's GL-drawn controls.
 void TimebarOverlay::reposition()
 {
-    if (!m_viewer || !m_viewer->isVisible()) return;
+    if (m_suppressReposition || m_closed) return;
+    if (!m_viewer) return;
+
+    // Hide only when the viewer has no usable size (node graph fullscreen etc.)
+    // Don't check isVisible() — it flickers during modal dialogs.
+    if (!m_viewer || m_viewer->width() < 50 || m_viewer->height() < 50) {
+        if (isVisible()) hide();
+        return;
+    }
+
+    // Restore visibility if it was hidden
+    if (!isVisible()) {
+        show();
+        // Re-apply blur since DWM state may have been lost
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+        applyBlurBehind(hwnd, kTints[m_opacityIdx]);
+    }
 
     const int vw = m_viewer->width();
     const int vh = m_viewer->height();
     const int oh = m_bar->preferredHeight() + 4;
 
-    static constexpr double kDefaultFraction = 0.75;  // 75% down — above info bar
+    static constexpr double kDefaultFraction = 0.75;
 
     const double fraction = kDefaultFraction + m_dragFraction;
     const double clamped  = std::clamp(fraction, 0.0,
                                        1.0 - static_cast<double>(oh) / vh);
-
-    // Back-correct drag fraction if clamped
     m_dragFraction = clamped - kDefaultFraction;
 
     const int pixelY = static_cast<int>(clamped * vh);
     const QPoint globalTopLeft = m_viewer->mapToGlobal(QPoint(0, pixelY));
+    setMaximumHeight(QWIDGETSIZE_MAX);
+    setMinimumHeight(0);
     setGeometry(globalTopLeft.x(), globalTopLeft.y(), vw, oh);
 }
 
@@ -357,4 +423,10 @@ void TimebarOverlay::paintEvent(QPaintEvent*)
 {
     QPainter p(this);
     p.fillRect(rect(), QColor(0, 0, 0, 0));
+}
+
+void TimebarOverlay::closeEvent(QCloseEvent* event)
+{
+    m_closed = true;
+    QWidget::closeEvent(event);
 }

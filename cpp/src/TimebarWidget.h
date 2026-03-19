@@ -29,6 +29,17 @@ public:
     int  preferredHeight() const;
     bool isThin()          const { return m_thin; }
 
+    // Geometry constants — public so overlay can anchor on toggle
+    static constexpr int kPad      = 10;
+    static constexpr int kBarY     = 22;
+    static constexpr int kBarH     = 12;
+    static constexpr int kMrkBelow = 2;
+    static constexpr int kMrkSize  = 5;
+    static constexpr int kThinBarY = 3;
+    static constexpr int kThinBarH = 8;
+    static constexpr int kThinMrkB = 2;
+    static constexpr int kThinMrkS = 4;
+
 signals:
     void seekToFrame        (int frame);
     void requestAddMarker   (int frame);  // double-click empty space
@@ -74,18 +85,4 @@ private:
     int               m_bgAlpha      = 80;   // start at ghost (most translucent)
     bool              m_thin         = false;
     QFont             m_font;
-
-    // Geometry constants (computed from mode)
-    static constexpr int kPad      = 10;
-    // Full mode
-    static constexpr int kLblH     = 18;
-    static constexpr int kBarY     = 30;
-    static constexpr int kBarH     = 14;
-    static constexpr int kMrkBelow = 3;
-    static constexpr int kMrkSize  = 5;
-    // Thin mode
-    static constexpr int kThinBarY = 4;
-    static constexpr int kThinBarH = 10;
-    static constexpr int kThinMrkB = 2;
-    static constexpr int kThinMrkS = 4;
 };

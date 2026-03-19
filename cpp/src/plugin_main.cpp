@@ -54,27 +54,35 @@ static QWidget* findViewer()
 }
 
 // ─── Sync timer ───────────────────────────────────────────────────────────────
+static void stopSyncTimer()
+{
+    if (g_syncTimer) g_syncTimer->stop();
+}
+
 static void startSyncTimer()
 {
     if (g_syncTimer && g_syncTimer->isActive()) return;
     if (!g_syncTimer) {
         g_syncTimer = new QTimer();
         g_syncTimer->setInterval(50);
+        QObject::connect(g_syncTimer, &QTimer::timeout, []{
+            if (g_overlay.isNull()) { g_syncTimer->stop(); return; }
+            try {
+                g_overlay->setCurrentFrame(NukeUtils::frame());
+                g_overlay->setRange(NukeUtils::firstFrame(), NukeUtils::lastFrame());
+                g_overlay->reposition();
+            } catch (...) {
+                g_overlay = nullptr;
+                g_syncTimer->stop();
+            }
+        });
     }
-    QObject::connect(g_syncTimer, &QTimer::timeout, []{
-        if (g_overlay.isNull()) { g_syncTimer->stop(); return; }
-        try {
-            g_overlay->setCurrentFrame(NukeUtils::frame());
-            g_overlay->setRange(NukeUtils::firstFrame(), NukeUtils::lastFrame());
-            g_overlay->reposition();   // tracks viewer as panes resize/move
-            g_overlay->raise();
-        } catch (...) {
-            g_overlay = nullptr;
-            g_syncTimer->stop();
-        }
-    });
     g_syncTimer->start();
 }
+
+// Forward declarations so TimebarOverlay can pause the sync timer during toggle
+void pauseSyncTimer()  { stopSyncTimer(); }
+void resumeSyncTimer() { startSyncTimer(); }
 
 // ─── showOverlay — must be called on the Qt main thread ──────────────────────
 static void showOverlay()
@@ -110,8 +118,14 @@ static void showOverlay()
 // This bypasses all Python C API module machinery entirely.
 extern "C" __declspec(dllexport) void mt_show()
 {
-    QMetaObject::invokeMethod(
-        QApplication::instance(), []{ showOverlay(); }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(QApplication::instance(), []{
+        if (!g_overlay.isNull() && g_overlay->isVisible()) {
+            g_lastFraction = g_overlay->dragFraction();
+            g_overlay->close();
+        } else {
+            showOverlay();
+        }
+    }, Qt::QueuedConnection);
 }
 
 // ─── nuke_startup — called by Nuke when the .dll is loaded ───────────────────

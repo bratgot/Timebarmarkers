@@ -7,6 +7,10 @@
 #include <QHBoxLayout>
 #include <vector>
 
+// Defined in plugin_main.cpp — pause/resume the 50ms sync timer
+extern void pauseSyncTimer();
+extern void resumeSyncTimer();
+
 class TimebarOverlay : public QWidget
 {
     Q_OBJECT
@@ -24,6 +28,7 @@ public:
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
     void paintEvent (QPaintEvent*) override;
+    void closeEvent (QCloseEvent*) override;
 
 private slots:
     void onAddMarker   (int frame);
@@ -48,10 +53,12 @@ private:
     QPushButton*   m_btnClose = nullptr;
 
     // Vertical drag — stored as fraction of viewer height so fullscreen scales
-    bool   m_dragActive        = false;
-    double m_dragFraction      = 0.0;   // user offset as fraction of vh
-    double m_dragStartFraction = 0.0;
-    int    m_dragStartGlobalY  = 0;
+    bool   m_dragActive         = false;
+    double m_dragFraction       = 0.0;
+    double m_dragStartFraction  = 0.0;
+    int    m_dragStartGlobalY   = 0;
+    bool   m_suppressReposition = false;
+    bool   m_closed             = false;  // set on explicit close, blocks reposition
 
     static const int   kOpacityLevels[];
     static const char* kOpacityTips[];
