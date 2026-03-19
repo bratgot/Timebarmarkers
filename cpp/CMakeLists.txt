@@ -76,6 +76,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt5::Widgets
     ${PYTHON_LIB}
     ${DDIMAGE_LIB}
+    dwmapi.lib
 )
 
 # Nuke expects the plugin as a plain .dll with no prefix
@@ -90,6 +91,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
     _USE_MATH_DEFINES
+    UNICODE
 )
 
 # ─── Install ─────────────────────────────────────────────────────────────────

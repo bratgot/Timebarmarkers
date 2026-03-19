@@ -5,43 +5,101 @@
 #include <QPainter>
 #include <QEvent>
 #include <QMouseEvent>
-#include <QResizeEvent>
 #include <QApplication>
 #include <algorithm>
 
+// Windows DWM blur-behind
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <dwmapi.h>
+
+// SetWindowCompositionAttribute — undocumented but stable since Win10
+enum WINDOWCOMPOSITIONATTRIB { WCA_ACCENT_POLICY = 19 };
+enum ACCENT_STATE {
+    ACCENT_DISABLED               = 0,
+    ACCENT_ENABLE_BLURBEHIND      = 3,
+    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
+};
+struct ACCENT_POLICY {
+    ACCENT_STATE AccentState;
+    DWORD        AccentFlags;
+    DWORD        GradientColor;   // AABBGGRR — background tint
+    DWORD        AnimationId;
+};
+struct WINDOWCOMPOSITIONATTRIBDATA {
+    WINDOWCOMPOSITIONATTRIB Attrib;
+    PVOID                   pvData;
+    SIZE_T                  cbData;
+};
+typedef BOOL (WINAPI* pfnSetWindowCompositionAttribute)(HWND, WINDOWCOMPOSITIONATTRIBDATA*);
+
+static void applyBlurBehind(HWND hwnd, DWORD tintAaBbGgRr = 0x80000000)
+{
+    // Try acrylic first (Win10 1703+), fall back to plain blur
+    HMODULE user32 = LoadLibraryA("user32.dll");
+    if (!user32) return;
+
+    auto fn = reinterpret_cast<pfnSetWindowCompositionAttribute>(
+        GetProcAddress(user32, "SetWindowCompositionAttribute"));
+
+    if (fn) {
+        ACCENT_POLICY accent{};
+        accent.AccentState  = ACCENT_ENABLE_ACRYLICBLURBEHIND;
+        accent.AccentFlags  = 0;
+        accent.GradientColor = tintAaBbGgRr;   // dark semi-transparent tint
+        accent.AnimationId  = 0;
+
+        WINDOWCOMPOSITIONATTRIBDATA data{};
+        data.Attrib  = WCA_ACCENT_POLICY;
+        data.pvData  = &accent;
+        data.cbData  = sizeof(accent);
+        fn(hwnd, &data);
+    }
+    FreeLibrary(user32);
+}
+
 // ─── Static data ──────────────────────────────────────────────────────────────
-const int TimebarOverlay::kOpacityLevels[] = {172, 80, 240};
+const int TimebarOverlay::kOpacityLevels[] = {80, 172, 240};
 const char* TimebarOverlay::kOpacityTips[] = {
-    "Opacity: semi (click for ghost)",
-    "Opacity: ghost (click for solid)",
-    "Opacity: solid (click for semi)",
+    "Opacity: ghost (click for semi)",
+    "Opacity: semi (click for solid)",
+    "Opacity: solid (click for ghost)",
+};
+
+static const DWORD kTints[] = {
+    0x55000000,   // ghost — 33% tint
+    0xCC000000,   // semi  — 80% tint
+    0xEE000000,   // solid — ~93% tint
 };
 
 static const QString kBtnStyle = QStringLiteral(
     "QPushButton {"
-    "  background: rgba(28,28,28,210);"
-    "  color: #777;"
-    "  border: 1px solid rgba(80,80,80,110);"
+    "  background: rgba(28,28,28,180);"
+    "  color: #888;"
+    "  border: 1px solid rgba(80,80,80,100);"
     "  border-radius: 3px;"
     "  font-size: 10px;"
     "  padding: 0px 2px;"
     "}"
-    "QPushButton:hover { color: #ddd; background: rgba(55,55,55,230); }"
+    "QPushButton:hover { color: #ddd; background: rgba(55,55,55,210); }"
 );
 
 // ─── Construction ─────────────────────────────────────────────────────────────
 TimebarOverlay::TimebarOverlay(QWidget* viewer)
-    : QWidget(viewer)        // parented to viewer — moves with it automatically
+    : QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint)
     , m_viewer(viewer)
+    , m_dragActive(false)
+    , m_dragFraction(0.0)         // position as fraction of viewer height
+    , m_dragStartFraction(0.0)
+    , m_dragStartGlobalY(0)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground);
     setAutoFillBackground(false);
     setMouseTracking(true);
 
-    // ── Layout: bar expands, buttons are fixed-size on the right ─────────────
     auto* hbox = new QHBoxLayout(this);
-    hbox->setContentsMargins(4, 3, 4, 3);
+    hbox->setContentsMargins(4, 2, 4, 2);
     hbox->setSpacing(3);
 
     m_bar = new TimebarWidget(this);
@@ -55,13 +113,17 @@ TimebarOverlay::TimebarOverlay(QWidget* viewer)
             this, &TimebarOverlay::onDeleteMarker);
     hbox->addWidget(m_bar, 1);
 
-    m_btnPrev  = makeBtn("<<", "Previous marker");
-    m_btnNext  = makeBtn(">>", "Next marker");
-    m_btnAdd   = makeBtn("+",  "Add marker at current frame");
-    m_btnThin  = makeBtn("v",  "Collapse bar height");
-    m_btnOpac  = makeBtn("T",  kOpacityTips[0]);
-    m_btnPanel = makeBtn("=",  "Open full marker list");
-    m_btnClose = makeBtn("x",  "Close overlay");
+    m_btnPrev  = makeBtn("\xc2\xab",          "Previous marker");
+    m_btnNext  = makeBtn("\xc2\xbb",          "Next marker");
+    m_btnAdd   = makeBtn("+",                 "Add marker at current frame");
+    m_btnThin  = makeBtn("v",                 "Collapse bar height");
+    m_btnOpac  = makeBtn("T",                 kOpacityTips[0]);
+    m_btnDrag  = makeBtn("\xe2\xa0\xbf",      "Drag to reposition vertically");
+    m_btnClose = makeBtn("x",                 "Close overlay");
+
+    m_btnDrag->setStyleSheet(kBtnStyle +
+        " QPushButton { color: #555; font-size: 13px; }");
+    m_btnDrag->setCursor(Qt::SizeVerCursor);
 
     connect(m_btnPrev,  &QPushButton::clicked, this, &TimebarOverlay::goPrev);
     connect(m_btnNext,  &QPushButton::clicked, this, &TimebarOverlay::goNext);
@@ -70,19 +132,22 @@ TimebarOverlay::TimebarOverlay(QWidget* viewer)
     });
     connect(m_btnThin,  &QPushButton::clicked, this, &TimebarOverlay::toggleThin);
     connect(m_btnOpac,  &QPushButton::clicked, this, &TimebarOverlay::cycleOpacity);
-    connect(m_btnPanel, &QPushButton::clicked, this, &TimebarOverlay::openPanel);
     connect(m_btnClose, &QPushButton::clicked, this, &QWidget::close);
 
     for (auto* btn : {m_btnPrev, m_btnNext, m_btnAdd, m_btnThin,
-                      m_btnOpac, m_btnPanel, m_btnClose})
+                      m_btnOpac, m_btnDrag, m_btnClose})
         hbox->addWidget(btn, 0);
 
-    // Install event filter on the GL viewer
+    m_btnDrag->installEventFilter(this);
     viewer->installEventFilter(this);
 
     reposition();
     show();
     raise();
+
+    // Apply blur-behind after the window handle exists
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    applyBlurBehind(hwnd, kTints[m_opacityIdx]);
 }
 
 TimebarOverlay::~TimebarOverlay()
@@ -141,7 +206,8 @@ void TimebarOverlay::toggleThin()
     m_bar->setThin(thin);
     m_btnThin->setText(thin ? "^" : "v");
     m_btnThin->setToolTip(thin ? "Expand bar height" : "Collapse bar height");
-    // Layout drives height automatically — just reposition the overlay geometry
+    // m_dragFraction positions the top edge — no adjustment needed since
+    // fraction is relative and the top stays fixed when height changes.
     reposition();
 }
 
@@ -151,13 +217,10 @@ void TimebarOverlay::cycleOpacity()
     m_opacityIdx = (m_opacityIdx + 1) % n;
     m_btnOpac->setToolTip(kOpacityTips[m_opacityIdx]);
     m_bar->setBgAlpha(kOpacityLevels[m_opacityIdx]);
-}
 
-void TimebarOverlay::openPanel()
-{
-    // Run the Python marker panel (reuse the Python-side show_panel if loaded)
-    // or simply show a message — the full panel is in the Python version.
-    // For a pure C++ build this can be extended; for now it's a no-op stub.
+    // Update DWM tint to match new opacity level
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    applyBlurBehind(hwnd, kTints[m_opacityIdx]);
 }
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
@@ -166,10 +229,8 @@ void TimebarOverlay::onAddMarker(int frame)
     MarkerDialog dlg(frame);
     dlg.setWindowTitle("Add Marker");
     if (dlg.exec() != QDialog::Accepted) return;
-
     auto markers = NukeUtils::loadMarkers();
     const Marker nm = dlg.result();
-    // Remove any existing marker on the same frame
     markers.erase(std::remove_if(markers.begin(), markers.end(),
                                  [&](const Marker& m){ return m.frame == nm.frame; }),
                   markers.end());
@@ -184,13 +245,10 @@ void TimebarOverlay::onEditMarker(int index)
     auto markers = NukeUtils::loadMarkers();
     if (index < 0 || index >= static_cast<int>(markers.size())) return;
     const Marker& old = markers[index];
-
-    MarkerDialog dlg(old.frame,
-                     QString::fromStdString(old.label),
+    MarkerDialog dlg(old.frame, QString::fromStdString(old.label),
                      QString::fromStdString(old.color));
     dlg.setWindowTitle("Edit Marker");
     if (dlg.exec() != QDialog::Accepted) return;
-
     const Marker nm = dlg.result();
     markers.erase(markers.begin() + index);
     markers.erase(std::remove_if(markers.begin(), markers.end(),
@@ -212,53 +270,89 @@ void TimebarOverlay::onDeleteMarker(int index)
 }
 
 // ─── Reposition ───────────────────────────────────────────────────────────────
+// Position stored as a FRACTION of viewer height so it scales correctly when
+// the viewer goes fullscreen (spacebar) or the pane is resized.
+//
+// m_dragFraction = 0.0  → top of viewer
+// m_dragFraction = 1.0  → bottom of viewer
+//
+// Default: kDefaultFraction places it just below Nuke's GL-drawn controls.
 void TimebarOverlay::reposition()
 {
-    if (!m_viewer) return;
-    const int pw = m_viewer->width();
-    const int ph = m_viewer->height();
-    const int oh = m_bar->preferredHeight() + 6;
-    // Snap to viewer bottom edge, full width
-    setGeometry(0, ph - oh, pw, oh);
+    if (!m_viewer || !m_viewer->isVisible()) return;
+
+    const int vw = m_viewer->width();
+    const int vh = m_viewer->height();
+    const int oh = m_bar->preferredHeight() + 4;
+
+    static constexpr double kDefaultFraction = 0.75;  // 75% down — above info bar
+
+    const double fraction = kDefaultFraction + m_dragFraction;
+    const double clamped  = std::clamp(fraction, 0.0,
+                                       1.0 - static_cast<double>(oh) / vh);
+
+    // Back-correct drag fraction if clamped
+    m_dragFraction = clamped - kDefaultFraction;
+
+    const int pixelY = static_cast<int>(clamped * vh);
+    const QPoint globalTopLeft = m_viewer->mapToGlobal(QPoint(0, pixelY));
+    setGeometry(globalTopLeft.x(), globalTopLeft.y(), vw, oh);
 }
 
 // ─── Event filter ─────────────────────────────────────────────────────────────
 bool TimebarOverlay::eventFilter(QObject* obj, QEvent* event)
 {
-    // Only process events from our specific viewer widget
-    if (obj != m_viewer) return false;
-
-    const QEvent::Type t = event->type();
-
-    if (t == QEvent::Resize ||
-        t == QEvent::Show   ||
-        t == QEvent::WindowActivate ||
-        t == QEvent::WindowStateChange) {
-        // Post to the event queue so the viewer geometry has fully settled
-        QMetaObject::invokeMethod(this, "reposition", Qt::QueuedConnection);
-        QMetaObject::invokeMethod(this, "raise",      Qt::QueuedConnection);
+    // ── Drag button ───────────────────────────────────────────────────────────
+    if (obj == m_btnDrag) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            if (me->button() == Qt::LeftButton) {
+                m_dragActive       = true;
+                m_dragStartGlobalY = me->globalY();
+                m_dragStartFraction = m_dragFraction;
+                return true;
+            }
+        }
+        if (event->type() == QEvent::MouseMove) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            if (m_dragActive && (me->buttons() & Qt::LeftButton)) {
+                const int   vh    = m_viewer->height();
+                const double delta = static_cast<double>(me->globalY() - m_dragStartGlobalY) / vh;
+                m_dragFraction = m_dragStartFraction + delta;
+                reposition();
+                return true;
+            }
+        }
+        if (event->type() == QEvent::MouseButtonRelease) {
+            auto* me = static_cast<QMouseEvent*>(event);
+            if (m_dragActive && me->button() == Qt::LeftButton) {
+                m_dragActive = false;
+                return true;
+            }
+        }
         return false;
     }
 
-    // Swallow mouse events that land inside our strip so Nuke's
-    // native QGLWidget handler (timeline popup) never fires
+    // ── Viewer GL — swallow mouse events inside our strip ─────────────────────
+    if (obj != m_viewer) return false;
+
+    const QEvent::Type t = event->type();
     if (t == QEvent::MouseButtonPress   ||
         t == QEvent::MouseButtonRelease ||
         t == QEvent::MouseButtonDblClick ||
         t == QEvent::Wheel) {
         if (auto* me = dynamic_cast<QMouseEvent*>(event)) {
-            if (geometry().contains(me->pos()))
-                return true;   // swallowed
-        } else if (auto* we = dynamic_cast<QWheelEvent*>(event)) {
-            if (geometry().contains(we->pos()))
+            const QPoint global = m_viewer->mapToGlobal(me->pos());
+            if (geometry().contains(global))
                 return true;
         }
     }
-
     return false;
 }
 
-// ─── Paint (shell is transparent — bar widget paints itself) ──────────────────
+// ─── Paint ───────────────────────────────────────────────────────────────────
+// DWM handles the blur — paintEvent only draws the bar widget's own content.
+// The overlay shell background is fully transparent here.
 void TimebarOverlay::paintEvent(QPaintEvent*)
 {
     QPainter p(this);

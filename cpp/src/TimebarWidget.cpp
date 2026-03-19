@@ -69,9 +69,9 @@ void TimebarWidget::setThin(bool thin)
 int TimebarWidget::preferredHeight() const
 {
     if (m_thin)
-        return kThinBarY + kThinBarH + kThinMrkB + kThinMrkS * 2 + 6;
+        return kThinBarY + kThinBarH + kThinMrkB + kThinMrkS * 2 + 2;
     else
-        return kBarY + kBarH + kMrkBelow + kMrkSize * 2 + 14;
+        return kBarY + kBarH + kMrkBelow + kMrkSize * 2 + 4;
 }
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────
@@ -138,10 +138,13 @@ void TimebarWidget::paintFull(QPainter& p)
         const QString lbl = QString::fromStdString(m.label);
 
         if (!lbl.isEmpty()) {
-            const int pillW = lfm.horizontalAdvance(lbl) + 10;
-            int pillX = std::max(kPad, xi - pillW / 2);
+            const int advance = lfm.horizontalAdvance(lbl);
+            const int margin  = 8;
+            const int pillW   = advance + margin * 2;
+            int pillX = xi - pillW / 2;
+            pillX = std::max(kPad, pillX);
             if (pillX < lastRx + 3) pillX = lastRx + 3;
-            pillX = std::min(pillX, w - kPad - pillW);
+            pillX = std::min(pillX, w - pillW);
             const int pillY = (kBarY - pillH) / 2;
 
             p.setBrush(QColor(col.red(), col.green(), col.blue(), 200));
@@ -150,7 +153,9 @@ void TimebarWidget::paintFull(QPainter& p)
 
             const double lum = 0.299 * col.red() + 0.587 * col.green() + 0.114 * col.blue();
             p.setPen(lum > 140 ? QColor(0, 0, 0, 230) : QColor(255, 255, 255, 230));
-            p.drawText(pillX + 5, pillY + pillH - 3, lbl);
+            // Baseline draw — no rect clipping at all
+            const int baseline = pillY + pillH - lfm.descent() - 2;
+            p.drawText(pillX + margin, baseline, lbl);
             lastRx = pillX + pillW;
         } else {
             // Unnamed — small neutral tick

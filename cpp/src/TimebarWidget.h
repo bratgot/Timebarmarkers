@@ -71,7 +71,7 @@ private:
     bool              m_dragging     = false;
     int               m_hoverFrame   = -1;
     int               m_hoverMarker  = -1;
-    int               m_bgAlpha      = 172;
+    int               m_bgAlpha      = 80;   // start at ghost (most translucent)
     bool              m_thin         = false;
     QFont             m_font;
 

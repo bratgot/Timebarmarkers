@@ -17,6 +17,9 @@ public:
     void setMarkers     (const std::vector<Marker>& markers);
     void setCurrentFrame(int frame);
     void setRange       (int first, int last);
+    void reposition();
+    void   setDragFraction(double f) { m_dragFraction = f; }
+    double dragFraction()      const { return m_dragFraction; }
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
@@ -30,10 +33,8 @@ private slots:
     void goNext();
     void toggleThin();
     void cycleOpacity();
-    void openPanel();
 
 private:
-    void reposition();
     QPushButton* makeBtn(const QString& label, const QString& tip);
 
     QWidget*       m_viewer   = nullptr;
@@ -43,8 +44,14 @@ private:
     QPushButton*   m_btnAdd   = nullptr;
     QPushButton*   m_btnThin  = nullptr;
     QPushButton*   m_btnOpac  = nullptr;
-    QPushButton*   m_btnPanel = nullptr;
+    QPushButton*   m_btnDrag  = nullptr;
     QPushButton*   m_btnClose = nullptr;
+
+    // Vertical drag — stored as fraction of viewer height so fullscreen scales
+    bool   m_dragActive        = false;
+    double m_dragFraction      = 0.0;   // user offset as fraction of vh
+    double m_dragStartFraction = 0.0;
+    int    m_dragStartGlobalY  = 0;
 
     static const int   kOpacityLevels[];
     static const char* kOpacityTips[];
