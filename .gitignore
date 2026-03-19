@@ -8,6 +8,9 @@ cpp/.vs/
 *.obj
 *.ilk
 
+# dist — DLL is built locally, not committed
+dist/*.dll
+
 # CMake
 CMakeCache.txt
 CMakeFiles/
