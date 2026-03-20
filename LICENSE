@@ -1,4 +1,5 @@
-MIT License
+MIT License — applies to the source code in this repository only.
+Third-party dependencies listed below have their own license terms.
 
 Copyright (c) 2026 bratgot
 
@@ -35,8 +36,14 @@ Python 3.9
   License: Python Software Foundation License (PSF-2.0)
   https://docs.python.org/3/license.html
 
-Windows SDK (DWM API)
-  License: Microsoft Windows SDK License
+Windows SDK (DWM / SetWindowCompositionAttribute)
+  License: Microsoft Windows SDK License Agreement (proprietary)
+  The DWM blur effect uses dwmapi.lib and the undocumented
+  SetWindowCompositionAttribute API, both part of the Windows SDK.
+  These are free to call from applications but are NOT MIT-licensed.
+  Redistribution of Windows SDK binaries (dwmapi.dll etc.) is governed
+  by Microsoft's terms — however dwmapi.dll ships with Windows itself
+  and does not need to be redistributed.
   https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/
 
 Nuke NDK
