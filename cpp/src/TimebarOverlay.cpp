@@ -249,9 +249,13 @@ void TimebarOverlay::toggleThin()
 
     pauseSyncTimer();
 
+    static constexpr int kInsetLeft  = 44;
+    static constexpr int kInsetRight = 60;
+    const int barW   = vw - kInsetLeft - kInsetRight;
+
     // Lock overlay geometry BEFORE setThin so layout has nothing to change
-    const QPoint g = m_viewer->mapToGlobal(QPoint(0, newTopY));
-    setGeometry(g.x(), g.y(), vw, newOh);
+    const QPoint g = m_viewer->mapToGlobal(QPoint(kInsetLeft, newTopY));
+    setGeometry(g.x(), g.y(), barW, newOh);
     setFixedHeight(newOh);
 
     m_bar->setThin(thin);
@@ -351,6 +355,14 @@ void TimebarOverlay::reposition()
     const int vh = m_viewer->height();
     const int oh = m_bar->preferredHeight() + 4;
 
+    // Insets keep the bar clear of Nuke's GL-drawn viewer chrome:
+    //   left  — rotopaint / paint tool icons (~44px)
+    //   right — 3D viewport controls / viewer toolbar icons (~60px)
+    static constexpr int kInsetLeft  = 44;
+    static constexpr int kInsetRight = 60;
+    const int barW = vw - kInsetLeft - kInsetRight;
+    const int barX = kInsetLeft;
+
     static constexpr double kDefaultFraction = 0.75;
 
     const double fraction = kDefaultFraction + m_dragFraction;
@@ -359,10 +371,10 @@ void TimebarOverlay::reposition()
     m_dragFraction = clamped - kDefaultFraction;
 
     const int pixelY = static_cast<int>(clamped * vh);
-    const QPoint globalTopLeft = m_viewer->mapToGlobal(QPoint(0, pixelY));
+    const QPoint globalOrigin = m_viewer->mapToGlobal(QPoint(barX, pixelY));
     setMaximumHeight(QWIDGETSIZE_MAX);
     setMinimumHeight(0);
-    setGeometry(globalTopLeft.x(), globalTopLeft.y(), vw, oh);
+    setGeometry(globalOrigin.x(), globalOrigin.y(), barW, oh);
 }
 
 // ─── Event filter ─────────────────────────────────────────────────────────────
