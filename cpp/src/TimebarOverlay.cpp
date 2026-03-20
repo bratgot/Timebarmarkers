@@ -60,17 +60,17 @@ static void applyBlurBehind(HWND hwnd, DWORD tintAaBbGgRr = 0x80000000)
 }
 
 // ─── Static data ──────────────────────────────────────────────────────────────
-const int TimebarOverlay::kOpacityLevels[] = {80, 172, 240};
+const int TimebarOverlay::kOpacityLevels[] = {30, 80, 240};
 const char* TimebarOverlay::kOpacityTips[] = {
-    "Opacity: ghost (click for semi)",
-    "Opacity: semi (click for solid)",
-    "Opacity: solid (click for ghost)",
+    "Opacity: very transparent (click for ghost)",
+    "Opacity: ghost (click for solid)",
+    "Opacity: solid (click for very transparent)",
 };
 
 static const DWORD kTints[] = {
-    0x55000000,   // ghost — 33% tint
-    0xCC000000,   // semi  — 80% tint
-    0xEE000000,   // solid — ~93% tint
+    0x20000000,   // very transparent — 12% tint
+    0x55000000,   // ghost            — 33% tint
+    0xEE000000,   // solid            — ~93% tint
 };
 
 static const QString kBtnStyle = QStringLiteral(

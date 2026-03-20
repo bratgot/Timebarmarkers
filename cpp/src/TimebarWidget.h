@@ -82,7 +82,7 @@ private:
     bool              m_dragging     = false;
     int               m_hoverFrame   = -1;
     int               m_hoverMarker  = -1;
-    int               m_bgAlpha      = 80;   // start at ghost (most translucent)
+    int               m_bgAlpha      = 30;   // start at very transparent
     bool              m_thin         = false;
     QFont             m_font;
 };
