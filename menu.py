@@ -9,29 +9,42 @@ import ctypes
 # ─── Marker Timebar (Nuke 14.1 only) ─────────────────────────────────────────
 if nuke.NUKE_VERSION_MAJOR == 14 and nuke.NUKE_VERSION_MINOR == 1:
 
-    _dll_path = os.path.join(os.path.expanduser("~"), ".nuke", "MarkerTimebar.dll")
+    # Resolve the .nuke directory — check multiple sources in priority order:
+    #   1. NUKE_PATH env var (explicit override)
+    #   2. This file's own directory (most reliable — we ARE in .nuke)
+    #   3. USERPROFILE env var (works on mapped drives, unlike expanduser)
+    #   4. expanduser fallback
+    def _find_nuke_dir():
+        # Best: use the directory this menu.py lives in
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if os.path.basename(_here) == ".nuke":
+            return _here
+        # Fallback: USERPROFILE (correct on mapped home drives)
+        _up = os.environ.get("USERPROFILE", "")
+        if _up:
+            return os.path.join(_up, ".nuke")
+        # Last resort
+        return os.path.join(os.path.expanduser("~"), ".nuke")
+
+    _nuke_dir = _find_nuke_dir()
+    _dll_path = os.path.join(_nuke_dir, "MarkerTimebar.dll")
 
     if os.path.exists(_dll_path):
-        # Load the DLL
         _mt_dll = ctypes.CDLL(_dll_path)
-
-        # Wire up mt_show
         _mt_dll.mt_show.restype  = None
         _mt_dll.mt_show.argtypes = []
 
-        # Inject as a proper Python module so "import marker_timebar_cpp" works
         _mt_mod = types.ModuleType("marker_timebar_cpp")
         _mt_mod.show = _mt_dll.mt_show
         sys.modules["marker_timebar_cpp"] = _mt_mod
 
-        # Register menu entry
         nuke.menu("Nuke").addMenu("Custom Tools").addCommand(
             "Marker Timebar",
             "import marker_timebar_cpp; marker_timebar_cpp.show()",
             "alt+m"
         )
 
-        nuke.tprint("Marker Timebar: loaded (Alt+M to show)")
+        nuke.tprint("Marker Timebar: loaded from {} (Alt+M to show)".format(_nuke_dir))
 
     else:
         nuke.tprint("Marker Timebar: DLL not found at {}".format(_dll_path))

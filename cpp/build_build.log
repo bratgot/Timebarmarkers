@@ -1,0 +1,7 @@
+MSBuild version 17.14.19+164abd434 for .NET Framework
+
+  1>Checking Build System
+  Automatic MOC for target MarkerTimebar
+  Building Custom Rule C:/dev/Timebarmarkers/cpp/CMakeLists.txt
+  MarkerTimebar.vcxproj -> C:\dev\Timebarmarkers\cpp\build\Release\MarkerTimebar.dll
+  Building Custom Rule C:/dev/Timebarmarkers/cpp/CMakeLists.txt

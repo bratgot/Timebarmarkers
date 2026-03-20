@@ -61,23 +61,18 @@ static std::string evalStr(const char* expr, const char* fallback = "")
 }
 
 // ─── Storage constants ────────────────────────────────────────────────────────
-static const char* STORAGE_NODE = "_MarkerTimebar_";
+// Data is stored on the Root node — it always exists, never appears in the
+// node graph, and is ignored by Nuke's "frame all" (F key) bounding box.
 static const char* STORAGE_KNOB = "mt_marker_data";
 
-static const char* ENSURE_NODE_SCRIPT = R"(
-import nuke, json
-_node = nuke.toNode('_MarkerTimebar_')
-if _node is None:
-    _node = nuke.nodes.NoOp(name='_MarkerTimebar_')
-    _node.setXpos(-2000000)
-    _node.setYpos(-2000000)
-    _node['hide_input'].setValue(True)
-    _node['label'].setValue('Marker Timebar data - do not delete')
-if 'mt_marker_data' not in _node.knobs():
-    _node.addKnob(nuke.Tab_Knob('mt_tab', 'Marker Timebar'))
+static const char* ENSURE_KNOB_SCRIPT = R"(
+import nuke
+_root = nuke.root()
+if 'mt_marker_data' not in _root.knobs():
+    _root.addKnob(nuke.Tab_Knob('mt_tab', 'Marker Timebar'))
     _k = nuke.String_Knob('mt_marker_data', 'marker JSON', '[]')
     _k.setFlag(nuke.INVISIBLE)
-    _node.addKnob(_k)
+    _root.addKnob(_k)
 )";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,11 +110,9 @@ void setFrame(int f)
 
 std::vector<Marker> loadMarkers()
 {
-    // Read JSON from the storage knob. Returns empty list if node doesn't exist.
     std::string json = evalStr(
-        "nuke.toNode('_MarkerTimebar_')['mt_marker_data'].getValue() "
-        "if nuke.toNode('_MarkerTimebar_') and "
-        "   'mt_marker_data' in nuke.toNode('_MarkerTimebar_').knobs() "
+        "nuke.root()['mt_marker_data'].getValue() "
+        "if 'mt_marker_data' in nuke.root().knobs() "
         "else '[]'"
     );
     return MarkerJson::fromJson(json);
@@ -128,13 +121,9 @@ std::vector<Marker> loadMarkers()
 void saveMarkers(const std::vector<Marker>& markers)
 {
     GilGuard g;
-    // Ensure the storage node exists
-    exec(ENSURE_NODE_SCRIPT);
+    exec(ENSURE_KNOB_SCRIPT);
 
-    // Write JSON to the knob
     std::string json = MarkerJson::toJson(markers);
-
-    // Escape backslashes and single quotes for the Python string literal
     std::string escaped;
     escaped.reserve(json.size());
     for (char c : json) {
@@ -143,8 +132,7 @@ void saveMarkers(const std::vector<Marker>& markers)
         else                escaped += c;
     }
     std::string cmd =
-        "nuke.toNode('_MarkerTimebar_')['mt_marker_data'].setValue('" +
-        escaped + "')";
+        "nuke.root()['mt_marker_data'].setValue('" + escaped + "')";
     exec(cmd.c_str());
 }
 

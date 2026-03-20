@@ -46,7 +46,6 @@ except ImportError:
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 PANEL_ID     = "com.tools.MarkerTimebar"
-STORAGE_NODE = "_MarkerTimebar_"
 STORAGE_KNOB = "mt_marker_data"
 POLL_MS      = 50
 OVERLAY_H    = 70    # pixel height of the docked strip (taller for label zone)
@@ -81,36 +80,31 @@ _sync_timer     = None  # type: Optional[QtCore.QTimer]
 
 
 # ─── Persistence helpers ──────────────────────────────────────────────────────
-def _ensure_storage_node():
-    node = nuke.toNode(STORAGE_NODE)
-    if node is None:
-        node = nuke.nodes.NoOp(name=STORAGE_NODE)
-        node.setXpos(-2000000)
-        node.setYpos(-2000000)
-        node["hide_input"].setValue(True)
-        node["label"].setValue("Marker Timebar data - do not delete")
-    if STORAGE_KNOB not in node.knobs():
-        node.addKnob(nuke.Tab_Knob("mt_tab", "Marker Timebar"))
+def _ensure_storage_knob():
+    """Add the marker data knob to the Root node if not already present."""
+    root = nuke.root()
+    if STORAGE_KNOB not in root.knobs():
+        root.addKnob(nuke.Tab_Knob("mt_tab", "Marker Timebar"))
         knob = nuke.String_Knob(STORAGE_KNOB, "marker JSON", "[]")
         knob.setFlag(nuke.INVISIBLE)
-        node.addKnob(knob)
-    return node
+        root.addKnob(knob)
+    return root
 
 
 def load_markers():
     # type: () -> List[Dict]
-    node = nuke.toNode(STORAGE_NODE)
-    if node is None or STORAGE_KNOB not in node.knobs():
+    root = nuke.root()
+    if STORAGE_KNOB not in root.knobs():
         return []
     try:
-        return json.loads(node[STORAGE_KNOB].getValue()) or []
+        return json.loads(root[STORAGE_KNOB].getValue()) or []
     except Exception:
         return []
 
 
 def save_markers(markers):
     # type: (List[Dict]) -> None
-    _ensure_storage_node()[STORAGE_KNOB].setValue(json.dumps(markers))
+    _ensure_storage_knob()[STORAGE_KNOB].setValue(json.dumps(markers))
 
 
 def _commit(markers):
