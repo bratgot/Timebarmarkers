@@ -1,120 +1,144 @@
-# Timebarmarkers
+# Marker Timebar for Nuke 14.1
 
-A custom timebar overlay for **Nuke 14.1** that adds named, colour-coded markers at arbitrary frames. The overlay docks inside Nuke's viewer as a draggable, semi-transparent strip with DWM acrylic blur — no separate window, no interference with your layout.
+A semi-transparent timebar overlay that sits inside Nuke's viewer, adding named colour-coded markers at arbitrary frames. Complements the native Nuke timeline without replacing it.
 
-Markers are stored as JSON in a hidden `NoOp` node inside the `.nk` script so they travel with the file. If someone opens the script without the tool loaded, the node is completely harmless.
-
----
-
-## Two implementations
-
-| | Python | C++ |
-|---|---|---|
-| **File** | `python/marker_timebar.py` | `cpp/` |
-| **Requires** | Nuke 14.1, PySide2 (bundled) | Nuke 14.1, Qt 5.15, VS 2019/2022, CMake |
-| **Install** | Drop file + one line in `menu.py` | Build `.dll`, drop in `~/.nuke` |
-| **Blur effect** | No | Yes — Windows DWM acrylic |
+![Platform](https://img.shields.io/badge/platform-Windows%2011-blue)
+![Nuke](https://img.shields.io/badge/Nuke-14.1-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
-## C++ — Quick Install
+## Features
+
+- Semi-transparent overlay with **Windows DWM acrylic blur** sits inside the viewer canvas
+- **Named, colour-coded markers** with label pills displayed above the bar
+- **Alt+M** toggles the overlay — remembers position between calls
+- Drag the **⠿** handle to reposition vertically anywhere in the viewer
+- **Collapse/expand** the bar height with v / ^
+- Three **opacity levels** — ghost, semi, solid
+- Navigate markers with **<<** and **>>**
+- Bar **scales correctly** when pressing Spacebar for fullscreen
+- **Hides automatically** when the node graph goes fullscreen
+- Inset from viewer edges — won't cover rotopaint or 3D viewport controls
+- Marker data stored on the **Root node** — no hidden nodes in the graph, no F-key zoom-out bug
+
+---
+
+## Installation
+
+### C++ plugin (recommended — includes DWM blur)
+
+Requires Nuke 14.1, Visual Studio 2019/2022, Qt 5.15, CMake 3.20+
 
 **1. Build**
 
-Open a Developer PowerShell for VS 2022 and run from `cpp\`:
+Open a **Developer Command Prompt for VS 2022** from the repo root:
 
-```powershell
-cmake -B build -A x64 `
-  -DNUKE_ROOT="C:/Program Files/Nuke14.1v8" `
-  -DQt5_ROOT="C:/Qt/5.15.2/msvc2019_64" `
-  -DPYTHON_LIB_DIR="C:/Users/<you>/AppData/Local/Programs/Python/Python39/libs" `
-  -DPYTHON_INCLUDE="C:/Users/<you>/AppData/Local/Programs/Python/Python39/include"
-
-cmake --build build --config Release
-cmake --install build
+```bat
+build.bat
 ```
 
-**2. Wire into Nuke**
+Edit the paths at the top of `build.bat` if Nuke, Qt or Python are in non-default locations.
 
-Copy `menu.py` to `%USERPROFILE%\.nuke\menu.py` (or merge the block into your existing one).  
-Restart Nuke — the overlay registers automatically.
+This builds `MarkerTimebar.dll`, copies it to `dist\` and installs it to `%USERPROFILE%\.nuke\` automatically.
+
+**2. menu.py**
+
+Copy `dist\menu.py` to `%USERPROFILE%\.nuke\menu.py`
+
+If you already have a `menu.py`, `build.bat` will append the Marker Timebar block automatically.
+
+**3. Restart Nuke and press Alt+M**
 
 ---
 
-## Python — Quick Install
+### Python plugin (no build required)
 
-1. Copy `python/marker_timebar.py` to `%USERPROFILE%\.nuke\`
+1. Copy `python\marker_timebar.py` to `%USERPROFILE%\.nuke\`
 2. Add to `%USERPROFILE%\.nuke\menu.py`:
 ```python
 import marker_timebar
 marker_timebar.register()
 ```
-3. Restart Nuke.
-
-Or run once from the Script Editor:
-```python
-import marker_timebar
-marker_timebar.show()
-```
+3. Restart Nuke
 
 ---
 
 ## Usage
 
 | Action | How |
-|--------|-----|
-| Show overlay | **Alt+M** |
-| Add marker | Click **+** button, or double-click / right-click empty bar |
-| Edit / Delete marker | Right-click a marker triangle |
-| Navigate markers | **<<** / **>>** buttons |
+|---|---|
+| Show / hide | **Alt+M** |
+| Add marker | **+** button · double-click bar · right-click empty bar |
+| Edit / Delete | Right-click a marker triangle |
+| Navigate | **<<** / **>>** |
 | Collapse bar | **v** (expand with **^**) |
-| Cycle opacity | **T** — ghost → semi → solid |
-| Reposition vertically | Drag the **⠿** button up/down |
-| Close | **x** button |
-
-Position is saved as a fraction of the viewer height, so it scales correctly when pressing **Spacebar** to go fullscreen. Position is also remembered between `Alt+M` calls within a session.
+| Opacity | **T** cycles ghost → semi → solid |
+| Reposition | Drag **⠿** up/down |
+| Close | **x** |
 
 ---
 
-## Compatibility
+## How markers are stored
 
-- **Nuke 14.1** · **Windows 11** (primary target)
-- Python version: PySide2 with PySide6 fallback (Nuke 15+)
-- C++ version: Qt 5.15 · MSVC 2019 or 2022 · DWM acrylic blur (Win10 1703+)
+Markers are saved as a hidden JSON knob on Nuke's **Root node**, not as a separate node in the graph:
+
+```
+Root {
+ mt_marker_data "[{\"frame\":10,\"label\":\"cut\",\"color\":\"#E05252\"}]"
+}
+```
+
+This means:
+- Markers travel with the `.nk` file
+- Nothing appears in the node graph
+- The F key zoom-to-fit is unaffected
+- Scripts opened without the tool installed are completely unaffected
 
 ---
 
-## File structure
+## Upgrading from v1
+
+Earlier versions stored markers in a `_MarkerTimebar_` NoOp node. To remove it run this in the Script Editor:
+
+```python
+exec(open(r'path/to/debug/delete_old_storage_node.py').read())
+```
+
+---
+
+## Building manually
+
+See [`cpp/README_BUILD.md`](cpp/README_BUILD.md) for full build instructions and troubleshooting.
+
+---
+
+## Repo structure
 
 ```
 Timebarmarkers/
-├── README.md
-├── .gitignore
-├── menu.py                         # Drop into %USERPROFILE%\.nuke\
+├── build.bat               # One-click build + install
+├── menu.py                 # Root menu.py
+├── dist/                   # Ready-to-install files (DLL built locally)
+│   ├── menu.py
+│   └── README_INSTALL.md
+├── debug/                  # Script Editor debug helpers
+│   ├── check_marker_data.py
+│   ├── delete_old_storage_node.py
+│   ├── find_old_storage_node.py
+│   └── print_qt_widgets.py
 ├── python/
-│   └── marker_timebar.py           # Drop-in Python plugin
-└── cpp/
+│   └── marker_timebar.py   # Python/PySide2 version
+└── cpp/                    # C++ plugin source
     ├── CMakeLists.txt
     ├── README_BUILD.md
     └── src/
-        ├── MarkerTypes.h           # Marker struct + JSON helpers
-        ├── NukeUtils.h/.cpp        # Nuke API via Python C API
-        ├── MarkerDialog.h/.cpp     # Add/edit dialog
-        ├── TimebarWidget.h/.cpp    # Custom-painted bar widget
-        ├── TimebarOverlay.h/.cpp   # Viewer overlay + DWM blur + drag
-        └── plugin_main.cpp         # nuke_startup + ctypes Python module
 ```
 
 ---
 
-## Storage format
+## License
 
-```json
-[
-  {"frame": 10,  "label": "cut",   "color": "#E05252"},
-  {"frame": 48,  "label": "hold",  "color": "#E0C030"},
-  {"frame": 120, "label": "end",   "color": "#40B878"}
-]
-```
+MIT — see [LICENSE](LICENSE)
 
-Stored in a `String_Knob` on a hidden `NoOp` at coordinates `(-2000000, -2000000)`. Invisible and inert to anyone without the tool.
+Third-party dependencies (Qt LGPL, Python PSF, Windows SDK, Nuke NDK) have their own terms — see LICENSE for details.
